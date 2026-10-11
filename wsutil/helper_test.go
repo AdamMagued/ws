@@ -80,3 +80,50 @@ func TestReadMessageEOF(t *testing.T) {
 		})
 	}
 }
+
+func TestReadMessageOversized(t *testing.T) {
+	lengths := []int64{
+		DefaultMaxFrameSize + 1,
+		1 << 34, // 16 GiB
+	}
+
+	for _, length := range lengths {
+		var buf bytes.Buffer
+		hdr := ws.Header{
+			Fin:    true,
+			OpCode: ws.OpBinary,
+			Length: length,
+		}
+		if err := ws.WriteHeader(&buf, hdr); err != nil {
+			t.Fatalf("WriteHeader() unexpected error: %v", err)
+		}
+
+		ms, err := ReadMessage(&buf, 0, nil)
+		if err != ErrFrameTooLarge {
+			t.Fatalf("ReadMessage(len=%d) error = %v; want %v", length, err, ErrFrameTooLarge)
+		}
+		if len(ms) != 0 {
+			t.Fatalf("ReadMessage(len=%d) returned %d messages; want 0", length, len(ms))
+		}
+	}
+}
+
+func TestReadDataOversized(t *testing.T) {
+	var buf bytes.Buffer
+	hdr := ws.Header{
+		Fin:    true,
+		OpCode: ws.OpBinary,
+		Length: 1 << 34, // 16 GiB
+	}
+	if err := ws.WriteHeader(&buf, hdr); err != nil {
+		t.Fatalf("WriteHeader() unexpected error: %v", err)
+	}
+
+	p, _, err := ReadData(&buf, 0)
+	if err != ErrFrameTooLarge {
+		t.Fatalf("ReadData() error = %v; want %v", err, ErrFrameTooLarge)
+	}
+	if p != nil {
+		t.Fatalf("ReadData() payload = %v; want nil", p)
+	}
+}

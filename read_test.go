@@ -37,6 +37,71 @@ func TestReadHeader(t *testing.T) {
 	}
 }
 
+func TestReadFrameOversized(t *testing.T) {
+	lengths := []int64{
+		DefaultMaxFrameSize + 1,
+		1 << 34, // 16 GiB
+		0x7f00000000000000,
+	}
+
+	for _, length := range lengths {
+		t.Run(fmt.Sprintf("len_%d", length), func(t *testing.T) {
+			var buf bytes.Buffer
+			hdr := Header{
+				Fin:    true,
+				OpCode: OpBinary,
+				Length: length,
+			}
+			if err := WriteHeader(&buf, hdr); err != nil {
+				t.Fatalf("WriteHeader() unexpected error: %v", err)
+			}
+
+			f, err := ReadFrame(&buf)
+			if err != ErrFrameTooLarge {
+				t.Fatalf("ReadFrame() error = %v; want %v", err, ErrFrameTooLarge)
+			}
+			if f.Payload != nil {
+				t.Fatalf("ReadFrame() allocated payload of len %d; want nil", len(f.Payload))
+			}
+		})
+	}
+}
+
+func TestReadFrameWithLimit(t *testing.T) {
+	payload := []byte("hello websocket")
+	raw := MustCompileFrame(NewTextFrame(payload))
+
+	t.Run("within limit", func(t *testing.T) {
+		f, err := ReadFrameWithLimit(bytes.NewReader(raw), int64(len(payload)))
+		if err != nil {
+			t.Fatalf("ReadFrameWithLimit() unexpected error: %v", err)
+		}
+		if !bytes.Equal(f.Payload, payload) {
+			t.Fatalf("ReadFrameWithLimit() payload = %q; want %q", f.Payload, payload)
+		}
+	})
+
+	t.Run("exceeds limit", func(t *testing.T) {
+		f, err := ReadFrameWithLimit(bytes.NewReader(raw), int64(len(payload)-1))
+		if err != ErrFrameTooLarge {
+			t.Fatalf("ReadFrameWithLimit() error = %v; want %v", err, ErrFrameTooLarge)
+		}
+		if f.Payload != nil {
+			t.Fatalf("ReadFrameWithLimit() payload = %v; want nil", f.Payload)
+		}
+	})
+
+	t.Run("zero limit disabled", func(t *testing.T) {
+		f, err := ReadFrameWithLimit(bytes.NewReader(raw), 0)
+		if err != nil {
+			t.Fatalf("ReadFrameWithLimit() unexpected error: %v", err)
+		}
+		if !bytes.Equal(f.Payload, payload) {
+			t.Fatalf("ReadFrameWithLimit() payload = %q; want %q", f.Payload, payload)
+		}
+	})
+}
+
 func BenchmarkReadHeader(b *testing.B) {
 	setup := func(header Header, n int) (rds []io.Reader) {
 		bts := MustCompileFrame(Frame{Header: header})

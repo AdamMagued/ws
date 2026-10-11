@@ -16,6 +16,12 @@ type Message struct {
 	Payload []byte
 }
 
+// DefaultMaxFrameSize controls the maximum frame payload size in bytes
+// used by ReadMessage, ReadData, and other helper functions.
+// If payload length exceeds this limit, ErrFrameTooLarge is returned.
+// A value of 0 disables the limit.
+var DefaultMaxFrameSize int64 = ws.DefaultMaxFrameSize
+
 // ReadMessage is a helper function that reads next message from r. It appends
 // received message(s) to the third argument and returns the result of it and
 // an error if some failure happened. That is, it probably could receive more
@@ -26,9 +32,10 @@ type Message struct {
 // TODO(gobwas): add DefaultReader with buffer size options.
 func ReadMessage(r io.Reader, s ws.State, m []Message) ([]Message, error) {
 	rd := Reader{
-		Source:    r,
-		State:     s,
-		CheckUTF8: true,
+		Source:       r,
+		State:        s,
+		CheckUTF8:    true,
+		MaxFrameSize: DefaultMaxFrameSize,
 		OnIntermediate: func(hdr ws.Header, src io.Reader) error {
 			bts, err := ioutil.ReadAll(src)
 			if err != nil {
@@ -44,6 +51,10 @@ func ReadMessage(r io.Reader, s ws.State, m []Message) ([]Message, error) {
 	}
 	var p []byte
 	if h.Fin {
+		if (DefaultMaxFrameSize > 0 && h.Length > DefaultMaxFrameSize) ||
+			int64(int(h.Length)) != h.Length || h.Length < 0 {
+			return m, ErrFrameTooLarge
+		}
 		// No more frames will be read. Use fixed sized buffer to read payload.
 		p = make([]byte, h.Length)
 		// It is not possible to receive io.EOF here because Reader does not
@@ -252,6 +263,7 @@ func readData(rw io.ReadWriter, s ws.State, want ws.OpCode) ([]byte, ws.OpCode, 
 		State:           s,
 		CheckUTF8:       true,
 		SkipHeaderCheck: false,
+		MaxFrameSize:    DefaultMaxFrameSize,
 		OnIntermediate:  controlHandler,
 	}
 	for {

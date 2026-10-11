@@ -15,7 +15,7 @@ var ErrNoFrameAdvance = errors.New("no frame advance")
 
 // ErrFrameTooLarge indicates that a message of length higher than
 // MaxFrameSize was being read.
-var ErrFrameTooLarge = errors.New("frame too large")
+var ErrFrameTooLarge = ws.ErrFrameTooLarge
 
 // FrameHandlerFunc handles parsed frame header and its body represented by
 // io.Reader.
@@ -69,8 +69,9 @@ type Reader struct {
 // make some protocol validity checks when it needed.
 func NewReader(r io.Reader, s ws.State) *Reader {
 	return &Reader{
-		Source: r,
-		State:  s,
+		Source:       r,
+		State:        s,
+		MaxFrameSize: DefaultMaxFrameSize,
 	}
 }
 
@@ -186,7 +187,8 @@ func (r *Reader) NextFrame() (hdr ws.Header, err error) {
 		return hdr, err
 	}
 
-	if n := r.MaxFrameSize; n > 0 && hdr.Length > n {
+	if (r.MaxFrameSize > 0 && hdr.Length > r.MaxFrameSize) ||
+		int64(int(hdr.Length)) != hdr.Length || hdr.Length < 0 {
 		return hdr, ErrFrameTooLarge
 	}
 
